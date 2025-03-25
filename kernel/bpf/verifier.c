@@ -218,23 +218,38 @@ struct bpf_call_arg_meta {
 
 static DEFINE_MUTEX(bpf_verifier_lock);
 
-void bpf_verifier_vlog(struct bpf_verifier_log *log, const char *fmt,
-		       va_list args)
+void bpf_verifier_vlog(struct bpf_verifier_log *log, const char *fmt, va_list args)
 {
-	unsigned int n;
+    unsigned int n;
 
-	n = vscnprintf(log->kbuf, BPF_VERIFIER_TMP_LOG_SIZE, fmt, args);
+    // 检查log指针是否为空
+    if (!log)
+        return;
 
-	WARN_ONCE(n >= BPF_VERIFIER_TMP_LOG_SIZE - 1,
-		  "verifier log line truncated - local buffer too short\n");
+    // 检查内核缓冲区指针是否有效
+    if (!log->kbuf)
+        return;
 
-	n = min(log->len_total - log->len_used - 1, n);
-	log->kbuf[n] = '\0';
+    n = vscnprintf(log->kbuf, BPF_VERIFIER_TMP_LOG_SIZE, fmt, args);
+    WARN_ONCE(n >= BPF_VERIFIER_TMP_LOG_SIZE - 1,
+              "verifier log line truncated - local buffer too short\n");
 
-	if (!copy_to_user(log->ubuf + log->len_used, log->kbuf, n + 1))
-		log->len_used += n;
-	else
-		log->ubuf = NULL;
+    // 检查剩余空间是否足够
+    if (log->len_used >= log->len_total)
+        return;
+
+    n = min(log->len_total - log->len_used - 1, n);
+    log->kbuf[n] = '\0';
+
+    // 检查用户空间缓冲区指针是否有效
+    if (!log->ubuf)
+        return;
+
+    // 尝试将日志复制到用户空间
+    if (!copy_to_user(log->ubuf + log->len_used, log->kbuf, n + 1))
+        log->len_used += n;
+    else
+        log->ubuf = NULL; // 复制失败，标记缓冲区无效
 }
 
 /* log_level controls verbosity level of eBPF verifier.
